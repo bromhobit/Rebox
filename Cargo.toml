@@ -1,0 +1,12 @@
+[package]
+name = "rebox"
+version = "1.0.1"
+edition = "2024"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+plist = "=1.10.0"
+
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+tempfile = "3"

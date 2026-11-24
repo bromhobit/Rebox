@@ -1,0 +1,3 @@
+backend = "/var/jb/usr/libexec/rebox/rebox-backend"
+renew_before_hours = 48
+apps = ["org.example.app"]
