@@ -1,0 +1,43 @@
+name: Build Rebox iOS
+
+on:
+  push:
+    branches: [roothide-support]
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust iOS target
+        run: rustup target add aarch64-apple-ios
+
+      - name: Build 4 iOS ARM64 binaries
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+        run: |
+          mkdir -p ios-bin
+          for manifest in ios-app/Cargo.toml controller/Cargo.toml ondevice/Cargo.toml apple/Cargo.toml; do
+            cargo build --release --locked --target aarch64-apple-ios --manifest-path "$manifest"
+          done
+          cp ios-app/target/aarch64-apple-ios/release/rebox-ui ios-bin/
+          cp controller/target/aarch64-apple-ios/release/rebox-controller ios-bin/
+          cp ondevice/target/aarch64-apple-ios/release/profilectl ios-bin/
+          cp apple/target/aarch64-apple-ios/release/rebox-apple ios-bin/
+
+      - name: Package .deb and .ipa
+        run: |
+          python3 packaging/build_release.py \
+            --binary-dir "$PWD/ios-bin" \
+            --output dist \
+            --version 1.0.1 \
+            --force
+          (cd dist && shasum -a 256 -c SHA256SUMS)
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rebox-ios-dist
+          path: dist/
