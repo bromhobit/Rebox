@@ -2,7 +2,7 @@ name: Build Rebox iOS
 
 on:
   push:
-    branches: [roothide-support]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
