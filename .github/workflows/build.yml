@@ -29,6 +29,8 @@ jobs:
 
       - name: Package .deb and .ipa
         run: |
+          brew install llvm
+          export PATH="$(brew --prefix llvm)/bin:$PATH"
           python3 packaging/build_release.py \
             --binary-dir "$PWD/ios-bin" \
             --output dist \
