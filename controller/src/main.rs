@@ -19,6 +19,10 @@ const LEGACY_BASE: &str = "/var/mobile/Library/DopamineRenew";
 const LIBEXEC_DIR: &str = "/var/jb/usr/libexec/rebox";
 const LEGACY_BIN_DIR: &str = "/var/mobile/Library/Rebox/bin";
 const DAEMON_PLIST: &str = "/var/jb/Library/LaunchDaemons/com.bromhobit.rebox.plist";
+const DAEMON_PLIST_NAME: &str = "com.bromhobit.rebox.plist";
+// Dopamine-RootHide has no /var/jb: the jailbreak lives in a randomized
+// `.jbroot-<ID>` directory under the Bundle/Application container.
+const ROOTHIDE_PARENT: &str = "/var/containers/Bundle/Application";
 const LEGACY_MIGRATION_ALLOWLIST: &[&str] = &[
     "config.plist",
     "apple-session.plist",
@@ -145,10 +149,42 @@ impl RuntimeEnv {
             .and_then(|p| p.parent().map(Path::to_path_buf));
         Self {
             base: PathBuf::from(BASE),
-            daemon_plist: PathBuf::from(DAEMON_PLIST),
+            daemon_plist: resolve_daemon_plist(Path::new(ROOTHIDE_PARENT)),
             helper_dirs: default_helper_dirs(exe_dir.as_deref()),
         }
     }
+}
+
+/// Directories that act as the jailbreak root: classic rootless `/var/jb`
+/// first, then every RootHide `.jbroot-*` directory found under `parent`.
+fn roothide_roots(parent: &Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(entries) = fs::read_dir(parent) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if name.to_string_lossy().starts_with(".jbroot-") {
+                roots.push(entry.path());
+            }
+        }
+    }
+    roots.sort();
+    roots
+}
+
+/// Picks the LaunchDaemon plist location for the current jailbreak flavour.
+/// Falls back to the classic rootless path when nothing exists yet.
+fn resolve_daemon_plist(roothide_parent: &Path) -> PathBuf {
+    let classic = PathBuf::from(DAEMON_PLIST);
+    if fs::metadata(&classic).is_ok_and(|m| m.is_file()) {
+        return classic;
+    }
+    for root in roothide_roots(roothide_parent) {
+        let candidate = root.join("Library/LaunchDaemons").join(DAEMON_PLIST_NAME);
+        if fs::metadata(&candidate).is_ok_and(|m| m.is_file()) {
+            return candidate;
+        }
+    }
+    classic
 }
 
 fn default_helper_dirs(exe_dir: Option<&Path>) -> Vec<PathBuf> {
@@ -158,6 +194,12 @@ fn default_helper_dirs(exe_dir: Option<&Path>) -> Vec<PathBuf> {
     }
     for fixed in [LIBEXEC_DIR, LEGACY_BIN_DIR] {
         let path = PathBuf::from(fixed);
+        if !dirs.contains(&path) {
+            dirs.push(path);
+        }
+    }
+    for root in roothide_roots(Path::new(ROOTHIDE_PARENT)) {
+        let path = root.join("usr/libexec/rebox");
         if !dirs.contains(&path) {
             dirs.push(path);
         }
@@ -1842,6 +1884,27 @@ mod tests {
         fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
         dir
+    }
+
+    #[test]
+    fn daemon_plist_is_found_inside_roothide_jbroot() {
+        let parent = unique_dir("roothide-parent");
+        let jbroot = parent.join(".jbroot-ABCDEF0123456789");
+        let daemons = jbroot.join("Library/LaunchDaemons");
+        fs::create_dir_all(&daemons).unwrap();
+        fs::write(daemons.join(DAEMON_PLIST_NAME), b"<plist/>").unwrap();
+        // Unrelated sibling must be ignored.
+        fs::create_dir_all(parent.join("SomeApp.app")).unwrap();
+
+        assert_eq!(
+            resolve_daemon_plist(&parent),
+            daemons.join(DAEMON_PLIST_NAME)
+        );
+
+        let empty = unique_dir("roothide-empty");
+        assert_eq!(resolve_daemon_plist(&empty), PathBuf::from(DAEMON_PLIST));
+        let _ = fs::remove_dir_all(&parent);
+        let _ = fs::remove_dir_all(&empty);
     }
 
     fn make_profile_dict(
